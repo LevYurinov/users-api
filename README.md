@@ -26,10 +26,10 @@ docker-compose up --build
 
 3. Эндпоинты и документация
 API будет доступно на:
-http://localhost:8080
+http://localhost:8081
 
 Swagger UI:
-http://localhost:8080/swagger/index.html
+http://localhost:8081/swagger/index.html
 
 📌 Эндпоинты API
 Метод	Путь	Описание
@@ -46,7 +46,7 @@ go test ./...
 
 📄 Swagger документация
 Swagger UI доступен после запуска:
-http://localhost:8080/swagger/index.html
+http://localhost:8081/swagger/index.html
 
 Исходники:
 docs/swagger.yaml
