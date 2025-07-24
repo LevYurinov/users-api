@@ -1,7 +1,7 @@
 # 1. Этап тестирования
 FROM golang:1.23-alpine AS test
 
-WORKDIR /app
+WORKDIR /go/src/pet
 
 # Копируем модули и скачиваем зависимости
 COPY go.mod go.sum ./
@@ -16,7 +16,7 @@ RUN go test ./...
 # 2. Этап сборки боевого бинарника
 FROM golang:1.23-alpine AS build
 
-WORKDIR /app
+WORKDIR /go/src/pet
 
 # Копируем зависимости и исходники из первого этапа
 COPY --from=test /go/pkg /go/pkg
@@ -30,8 +30,8 @@ FROM alpine:latest
 
 WORKDIR /app
 
-# Копируем бинарь из предыдущего этапа
-COPY --from=build /app/main .
+# Копируем бинарь из предыдущего этапа (указываем правильный путь)
+COPY --from=build /go/src/pet/main .
 
 # Запуск сервера
 CMD ["./main"]
