@@ -1,0 +1,376 @@
+basePath: /
+definitions:
+  model.LoginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  model.PartialUser:
+    properties:
+      age:
+        maximum: 130
+        minimum: 0
+        type: integer
+      balance:
+        minimum: 0
+        type: number
+      email:
+        type: string
+      hashedPassword:
+        description: не указывать json:"..." — не придет снаружи
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+    required:
+    - email
+    - name
+    type: object
+  model.RegisterRequest:
+    properties:
+      age:
+        maximum: 130
+        minimum: 0
+        type: integer
+      email:
+        type: string
+      name:
+        type: string
+      password:
+        type: string
+    required:
+    - email
+    - name
+    - password
+    type: object
+  model.User:
+    properties:
+      age:
+        maximum: 130
+        minimum: 0
+        type: integer
+      balance:
+        minimum: 0
+        type: number
+      email:
+        type: string
+      hashedPassword:
+        description: не указывать json:"..." — не придет снаружи
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      role:
+        type: string
+    required:
+    - email
+    - name
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: example@example.com
+    name: Иван Иванов
+  description: Документация API для управления пользователями (CRUD + авторизация).
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Users API
+  version: "1.0"
+paths:
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: Принимает email и пароль, валидирует, проверяет в БД, создает JWT
+        access и refresh токены, возвращает access токен в JSON и refresh токен в
+        HTTP-only cookie
+      parameters:
+      - description: Данные для авторизации (email и пароль)
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/model.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: access-token и сообщение об успешной авторизации
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Неверный JSON или ошибка валидации
+          schema:
+            type: string
+        "401":
+          description: Неверный email или пароль
+          schema:
+            type: string
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            type: string
+      summary: Авторизовать пользователя и получить JWT токены
+      tags:
+      - users
+  /me:
+    get:
+      description: Извлекает ID пользователя из контекста (установленного middleware),
+        ищет пользователя в БД, возвращает JSON
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.User'
+        "404":
+          description: Пользователь не найден
+          schema:
+            type: string
+        "500":
+          description: Ошибка сервера при извлечении ID из контекста
+          schema:
+            type: string
+      summary: Получить пользователя по ID из контекста (текущий пользователь)
+      tags:
+      - users
+  /ready:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Проверка готовности сервера
+      tags:
+      - health
+  /register:
+    post:
+      consumes:
+      - application/json
+      description: Декодирует, валидирует поля JSON, генерирует хеш-пароль, добавляет
+        в БД, возвращает ответ
+      parameters:
+      - description: Информация о пользователе
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/model.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.User'
+        "400":
+          description: Неверный JSON или ошибка валидации
+          schema:
+            type: string
+        "422":
+          description: Ошибка бизнес-валидации (например, обязательные поля)
+          schema:
+            type: string
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            type: string
+      summary: Зарегистрировать нового пользователя
+      tags:
+      - users
+  /users:
+    get:
+      description: делает запрос в БД, получает слайс со всем пользователями, инкодирует
+        в JSON и возвращает ответ
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.User'
+            type: array
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            type: string
+      summary: Получить всех пользователей из БД
+      tags:
+      - users
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Информация о пользователе
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/model.User'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.User'
+        "400":
+          description: Неверный JSON или ошибка валидации
+          schema:
+            type: string
+        "422":
+          description: Ошибка бизнес-валидации (например, обязательные поля)
+          schema:
+            type: string
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            type: string
+      summary: Создать пользователя
+      tags:
+      - users
+  /users/{id}:
+    delete:
+      description: Извлекает ID из URL, удаляет данные о пользователе из БД
+      parameters:
+      - description: ID пользователя
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: Пользователь успешно удалён
+        "400":
+          description: Неверный ID
+          schema:
+            type: string
+        "404":
+          description: Пользователь не найден в БД
+          schema:
+            type: string
+      summary: Удалить пользователя
+      tags:
+      - users
+    get:
+      description: делает запрос в БД, получает пользователя, инкодирует в JSON и
+        возвращает ответ
+      parameters:
+      - description: ID пользователя
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.User'
+        "400":
+          description: ошибка при получении ID
+          schema:
+            type: string
+        "404":
+          description: Пользователь не найден в БД
+          schema:
+            type: string
+      summary: Получить пользователя по ID
+      tags:
+      - users
+    patch:
+      consumes:
+      - application/json
+      description: Извлекает ID из URL, парсит JSON, валидирует поля, обновляет данные
+        пользователя в БД
+      parameters:
+      - description: ID пользователя
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Информация о пользователе
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/model.PartialUser'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.User'
+        "400":
+          description: Неверный JSON или ошибка валидации
+          schema:
+            type: string
+        "404":
+          description: Пользователь не найден в БД
+          schema:
+            type: string
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            type: string
+      summary: Частично обновить пользователя
+      tags:
+      - users
+    put:
+      consumes:
+      - application/json
+      description: парсит ID из URL, декодирует новые данные о пользователе, валидирует,
+        обновляет в БД, отправляет ответ
+      parameters:
+      - description: ID пользователя
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Информация о пользователе
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/model.User'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.User'
+        "400":
+          description: Неверный JSON или ошибка валидации
+          schema:
+            type: string
+        "404":
+          description: Пользователь не найден в БД
+          schema:
+            type: string
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            type: string
+      summary: Полностью обновить пользователя
+      tags:
+      - users
+swagger: "2.0"

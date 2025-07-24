@@ -1,0 +1,22 @@
+# Go
+*.exe
+*.out
+*.test
+*.log
+*.tmp
+*.swp
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Dependency management
+vendor/
+
+# OS/system files
+.DS_Store
+Thumbs.db
+
+# Binaries & env
+bin/
+.env

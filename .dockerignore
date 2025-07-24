@@ -1,0 +1,19 @@
+# Системные
+.git
+*.log
+*.tmp
+*.swp
+*.DS_Store
+
+# Go-артефакты
+bin/
+*.test
+*.exe
+*.out
+
+# IDE-шный мусор
+.vscode/
+.idea/
+
+# Если у тебя есть vendor
+vendor/
