@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"pet/model"
-	"pet/repository"
+	"pet/internal/model"
+	"pet/internal/repository"
 	"testing"
 )
 
@@ -50,7 +50,13 @@ func seedTestUsers(testBD *sql.DB) (map[string]model.User, error) {
 		if err != nil {
 			return nil, err
 		}
-		expected[email] = model.User{id, name, age, email}
+		expected[email] = model.User{
+			ID:    id,
+			Name:  name,
+			Age:   age,
+			Email: email,
+			// Остальные поля можно не заполнять, и они будут с нулевыми значениями
+		}
 	}
 
 	if rows.Err() != nil {

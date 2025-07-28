@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"os"
-	"pet/database"
+	"pet/internal/database"
 	"testing"
 )
 

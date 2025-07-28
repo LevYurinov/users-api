@@ -26,9 +26,9 @@ import (
 
 var errorsLogger *log.Logger
 
-//func InitLogger(l *log.Logger) {
-//	errorsLogger = l
-//}
+func InitLogger(l *log.Logger) { // используется в пакете test
+	errorsLogger = l
+}
 
 var validate *validator.Validate
 
