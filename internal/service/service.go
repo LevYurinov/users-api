@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"pet/model"
+	"pet/internal/model"
 )
 
 type UserRepository interface {
