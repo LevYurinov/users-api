@@ -1,4 +1,4 @@
-version: '3.9'
+version: '3.9' # последняя стабильная версия спецификации, совместимая с Docker 20.10+.
 
 services:
   db:
@@ -24,6 +24,9 @@ services:
       - "8081:8081"
     environment:
       POSTGRES_DSN: postgres://postgres:postgres@db:5432/app_db?sslmode=disable
+      APP_ENV: dev               # dev / prod
+      LOG_LEVEL: debug           # debug / info / warn / error
+      LOG_WITH_STACK: "true"     # true / false
 
 volumes:
   postgres_data:
