@@ -10,7 +10,6 @@
 package main
 
 import (
-	"fmt"
 	"go.uber.org/zap"
 	"os"
 	"pet/config"
@@ -33,22 +32,31 @@ func main() {
 	defer func() {
 		r := recover()
 		if r != nil {
-			log.Error("panic recovered", zap.Any("error", r), zap.ByteString("stack", debug.Stack()))
+			log.Error(
+				"panic recovered",
+				zap.Any("error", r),
+				zap.ByteString("stack", debug.Stack()), // для паник всегда логирую стек
+			)
 		}
 	}()
 
+	// Подключается к БД
 	dbUsers, err := database.ConnectDB("app_db")
 	if err != nil {
-		errorsLogger.Println("[DB] не удалось подключиться к БД:", err)
-		fmt.Println("[DB] подробности ошибки:", err)
-		os.Exit(1) // <--- добавь это, чтобы программа завершилась при ошибке подключения
+		log.Error(
+			"cannot connect to DB",
+			zap.Error(err),
+			zap.String("db_name", "app_db"),
+			zap.String("env", cfg.Logger.AppEnv),
+			zap.String("component", "database"),
+			zap.String("operation", "connect"),
+		)
+		os.Exit(1)
 	}
 	defer dbUsers.Close()
 
-	repo := repository.NewUserRepository(dbUsers, errorsLogger)
+	repo := repository.NewUserRepository(dbUsers, log)
+	server.StartServer(repo, log)
 
-	server.StartServer(repo, errorsLogger)
 	// client.Run(errorsLogger)
-
-	fmt.Println("Сервер завершил работу") // <- если ты это видишь — значит сервер НЕ запустился
 }

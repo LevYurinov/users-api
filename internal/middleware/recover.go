@@ -1,24 +1,27 @@
 package middleware
 
 import (
-	"log"
+	"go.uber.org/zap"
 	"net/http"
 	"runtime/debug"
 )
 
-// Recoverer — middleware, которое перехватывает panic и возвращает 500
-func Recoverer(logger *log.Logger) func(next http.Handler) http.Handler {
+// Recoverer — middleware, который перехватывает паники, логирует ошибку и возвращает HTTP 500
+func Recoverer() func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(wr http.ResponseWriter, req *http.Request) {
 
-			// defer-функция отработает даже при panic
+			log := LoggerFromContext(req.Context())
+
 			defer func() {
 				err := recover()
 				if err != nil {
-					// Логгируем panic и stack trace
-					logger.Printf("[PANIC RECOVERED] %v\n%s", err, debug.Stack())
+					log.Error(
+						"panic recovered",
+						zap.Any("error", err),
+						zap.ByteString("stack", debug.Stack()),
+					)
 
-					// Возвращаем 500 клиенту
 					http.Error(wr, "Внутренняя ошибка сервера", http.StatusInternalServerError)
 				}
 			}()

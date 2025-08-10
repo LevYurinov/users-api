@@ -9,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	httpSwagger "github.com/swaggo/http-swagger"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"log"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"pet/internal/middleware"
 	"pet/internal/model"
 	"pet/internal/repository"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -24,9 +26,11 @@ import (
 	_ "pet/docs" // важно для инициализации swagger-доков
 )
 
+// errorsLogger - отдельный логгер для тестов из пакета test
 var errorsLogger *log.Logger
 
-func InitLogger(l *log.Logger) { // используется в пакете test
+// InitLogger - отдельная функция для логирования тестов с помощью стандартного пакета
+func InitLogger(l *log.Logger) {
 	errorsLogger = l
 }
 
@@ -42,38 +46,40 @@ func InitValidator() {
 // @Summary Запускает сервер, настраивает роутер и хендлеры
 // @Description Производит запуск сервера на localhost:8080.
 // Запускает и настраивает роутер для страниц, где происходят CRUD-операции с пользователями и БД.
-func StartServer(repo *repository.UserRepository, l *log.Logger) {
-	errorsLogger = l
-
+func StartServer(repo *repository.UserRepository, log *zap.Logger) {
 	InitValidator()
 
-	// router := SetupRoutes(repo) // инициализация роутера, настройка ручек,
-	// но IDE дает ошибку, т.к. не видит тип *mux.Router
+	var handler http.Handler = SetupRoutes(repo) // явно указываю тип
 
-	var handler http.Handler = SetupRoutes(repo) // теперь явно указываю тип
-
-	handler = middleware.Recoverer(errorsLogger)(handler) // сначала обработка panic()
-	handler = middleware.Logging(errorsLogger)(handler)   // централизированное логирование middleware
+	handler = middleware.WithLogger(log)(handler)         // кладем логгер в контекст для исп. в ручках
+	handler = middleware.Recoverer()(handler)             // сначала обработка panic()
+	handler = middleware.MidLog()(handler)                // логирует метод, путь, статус-код и время выполнения запроса
 	handler = middleware.Cors()(handler)                  // обработка предзапросов браузера
 	handler = middleware.DefaultHeaders()(handler)        // системные заголовки по умолчанию
 	handler = middleware.RateLimiterMiddleware()(handler) // добавил лимит запросов 5-10 в секунду
-	// handler = auth.AuthMiddleware(handler)             // проверка токена и передачу ID через контекст
+	//handler = auth.AuthMiddleware(handler)              // проверка токена и передачи ID через контекст
 
-	if handler == nil {
-		errorsLogger.Println("[FATAL] handler is nil — сервер не запустится")
-		return
-	}
+	log.Info("Starting HTTP-server on :8080")
 
 	err := runServer(handler) // запуск сервера с проверкой
 	if err != nil {
-		errorsLogger.Println("[SERVER] сервер не был запущен:", err)
+		// Если сервер остановился с ошибкой, отличной от http.ErrServerClosed — это реально ошибка
+		if errors.Is(err, http.ErrServerClosed) {
+			// graceful shutdown — нормальное завершение, логируем как info
+			log.Info("Server stopped gracefully")
+		} else {
+			// неожиданная ошибка — логируем с ошибкой и стеком
+			log.Error(
+				"Server stopped with error",
+				zap.Error(err),
+				zap.ByteString("stack", debug.Stack()),
+			)
+		}
 		return
-	} else {
-		errorsLogger.Println("[SERVER] завершил работу без ошибок") // для контроля
 	}
-}
 
-// TODO - в сл раз лучше делать методы, а не функции
+	log.Info("Server stopped gracefully")
+}
 
 // SetupRoutes - настройки роутера и хендлеров
 func SetupRoutes(repo *repository.UserRepository) *mux.Router {
@@ -114,18 +120,11 @@ func SetupRoutes(repo *repository.UserRepository) *mux.Router {
 	return router
 }
 
-// runServer - запускает сервер на http://localhost:8080
+// runServer - запускает сервер на :8080
 func runServer(handler http.Handler) error {
 	//go func() {
-	errorsLogger.Println("[SERVER] сервер запущен на http://localhost:8080")
-
-	fmt.Println("[DEBUG] запускаем сервер...")
 	err := http.ListenAndServe(":8081", handler)
-	fmt.Println("[DEBUG] после ListenAndServe")
-
 	if err != nil {
-		fmt.Println("[SERVER] ошибка при запуске сервера:", err)
-		errorsLogger.Printf("[SERVER] ошибка при запуске сервера: %v", err)
 		return err
 	}
 	//}()
@@ -135,22 +134,6 @@ func runServer(handler http.Handler) error {
 	//	return fmt.Errorf("[SERVER] сервер не запустился вовремя: %v", err)
 	//}
 	return nil
-}
-
-func waitForServer(url string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	return fmt.Errorf("[SERVER] сервер не ответил на %s. Таймаут: %v", url, timeout)
 }
 
 // ReadyHandler проверяет, работает ли сервер
@@ -177,6 +160,9 @@ func ReadyHandler(w http.ResponseWriter, r *http.Request) {
 // @Router /users [post]
 func PostUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		log := middleware.LoggerFromContext(r.Context())
+
 		var newUser model.User
 
 		defer r.Body.Close()
@@ -205,16 +191,26 @@ func PostUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 			return
 		}
 
-		// вернуть статус и заголовки
+		// вернуть статус и заголовки, удалим как будет готов ErrorHandler
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 
 		// вернуть добавленного пользователя
 		err = json.NewEncoder(w).Encode(postUser)
 		if err != nil {
-			errorsLogger.Printf("[SERVER] ошибка при кодировании ответа: %v", err)
+			log.Error(
+				"encoding error",
+				zap.Error(err),
+				zap.String("event", "UserCreated"),
+			)
+			return
 		}
-		errorsLogger.Printf("[SERVER] пользователь успешно добавлен: %+v", postUser)
+
+		log.Info("user added successfully",
+			zap.String("event", "UserCreated"),
+			zap.Int("user.id", postUser.ID),
+			zap.String("user.email", postUser.Email),
+		)
 	}
 }
 
@@ -272,6 +268,8 @@ func RegisterHandler(repo *repository.UserRepository) http.HandlerFunc {
 			return
 		}
 
+		log := middleware.LoggerFromContext(r.Context())
+
 		// вернуть статус и заголовки. Нужны ли еще какие-либо заголовки?
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -279,9 +277,19 @@ func RegisterHandler(repo *repository.UserRepository) http.HandlerFunc {
 		// вернуть добавленного пользователя
 		err = json.NewEncoder(w).Encode(postUser)
 		if err != nil {
-			errorsLogger.Printf("[SERVER] ошибка при кодировании ответа: %v", err)
+			log.Error(
+				"encoding error",
+				zap.Error(err),
+				zap.String("event", "UserRegistered"),
+			)
+			return
 		}
-		errorsLogger.Printf("[SERVER] пользователь с ID %d успешно добавлен", postUser.ID)
+
+		log.Info("user added successfully",
+			zap.String("event", "UserCreated"),
+			zap.Int("user.id", postUser.ID),
+			zap.String("user.email", postUser.Email),
+		)
 	}
 }
 
@@ -301,15 +309,24 @@ func GetUsersHandler(repo *repository.UserRepository) http.HandlerFunc {
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
+		log := middleware.LoggerFromContext(r.Context())
+
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 
 		err = json.NewEncoder(w).Encode(getUsers)
 		if err != nil {
-			errorsLogger.Printf("[SERVER] ошибка при записи в тело ответа: %v", err)
+			log.Error(
+				"encoding error",
+				zap.Error(err),
+				zap.String("event", "GetUsers"),
+			)
+			return
 		}
 
-		errorsLogger.Println("[SERVER] список пользователей успешно отправлен")
+		log.Info("users got successfully",
+			zap.String("event", "GetUsers"),
+		)
 	}
 }
 
@@ -328,6 +345,8 @@ func GetUsersHandler(repo *repository.UserRepository) http.HandlerFunc {
 // @Router /users/{id} [put]
 func PutUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		log := middleware.LoggerFromContext(r.Context())
 
 		id, err := parseIDFromRequest(r)
 		if err != nil {
@@ -375,10 +394,21 @@ func PutUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+
 		err = json.NewEncoder(w).Encode(putUser)
 		if err != nil {
-			errorsLogger.Printf("[SERVER] ошибка при ответе PUT-запроса: %v", err)
+			log.Error("encoding error",
+				zap.Error(err),
+				zap.String("event", "UserPut"),
+			)
+			return
 		}
+
+		log.Info("user added successfully",
+			zap.String("event", "UserPut"),
+			zap.Int("user.id", putUser.ID),
+			zap.String("user.email", putUser.Email),
+		)
 	}
 }
 
@@ -397,6 +427,7 @@ func PutUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 // @Router /users/{id} [patch]
 func PatchUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log := middleware.LoggerFromContext(r.Context())
 
 		id, err := parseIDFromRequest(r)
 		if err != nil {
@@ -415,7 +446,7 @@ func PatchUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 			return
 		}
 
-		//// добавил эту логику
+		//// убрал эту логику
 		//if updatedUser.Name == nil && updatedUser.Age == nil && updatedUser.Email == nil {
 		//	http.Error(w, "[SERVER] необходимо передать хотя бы одно поле для обновления", http.StatusBadRequest)
 		//	return
@@ -444,7 +475,21 @@ func PatchUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(patchUser)
+
+		err = json.NewEncoder(w).Encode(patchUser)
+		if err != nil {
+			log.Error("encoding error",
+				zap.Error(err),
+				zap.String("event", "UserPatch"),
+			)
+			return
+		}
+
+		log.Info("user added successfully",
+			zap.String("event", "UserPatch"),
+			zap.Int("user.id", patchUser.ID),
+			zap.String("user.email", patchUser.Email),
+		)
 	}
 }
 
@@ -459,6 +504,8 @@ func PatchUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 // @Router /users/{id} [delete]
 func DeleteUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		log := middleware.LoggerFromContext(r.Context())
 
 		id, err := parseIDFromRequest(r)
 		if err != nil {
@@ -487,6 +534,8 @@ func DeleteUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 // @Router /users/{id} [get]
 func GetUserByIDFromURLHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		log := middleware.LoggerFromContext(r.Context())
 
 		id, err := parseIDFromRequest(r)
 		if err != nil {
@@ -517,6 +566,8 @@ func GetUserByIDFromURLHandler(repo *repository.UserRepository) http.HandlerFunc
 // @Router /me [get]
 func GetUserByIDFromContextHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		log := middleware.LoggerFromContext(r.Context())
 
 		id, ok := auth.GetUserIDFromContext(r)
 		if !ok {
@@ -551,6 +602,8 @@ func GetUserByIDFromContextHandler(repo *repository.UserRepository) http.Handler
 // @Router /login [post]
 func LoginHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		log := middleware.LoggerFromContext(r.Context())
 
 		var user model.LoginRequest
 		err := json.NewDecoder(r.Body).Decode(&user)
@@ -604,13 +657,25 @@ func LoginHandler(repo *repository.UserRepository) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+
 		err = json.NewEncoder(w).Encode(map[string]string{
 			"message":      "Успешная авторизация",
 			"access-token": accessTokenString,
 		})
 		if err != nil {
-			errorsLogger.Printf("[SERVER] ошибка при кодировании ответа: %v", err)
+			log.Error(
+				"encoding error",
+				zap.Error(err),
+				zap.String("event", "UserLogin"),
+			)
+			return
 		}
+
+		log.Info("user added successfully",
+			zap.String("event", "UserLogin"),
+			zap.Int("user.id", loginUser.ID),
+			zap.String("user.email", loginUser.Email),
+		)
 	}
 }
 
@@ -659,4 +724,18 @@ func getRefreshToken(user model.User) (string, error) {
 	return tokenString, nil
 }
 
-// стандарт RFC 6750 (OAuth 2.0 Bearer Token Usage).
+func waitForServer(url string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return fmt.Errorf("[SERVER] сервер не ответил на %s. Таймаут: %v", url, timeout)
+}
