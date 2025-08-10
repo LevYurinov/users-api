@@ -22,7 +22,7 @@ func Recoverer() func(next http.Handler) http.Handler {
 						zap.ByteString("stack", debug.Stack()),
 					)
 
-					http.Error(wr, "Внутренняя ошибка сервера", http.StatusInternalServerError)
+					http.Error(wr, "internal server error", http.StatusInternalServerError)
 				}
 			}()
 			// Передаём выполнение дальше

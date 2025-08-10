@@ -14,7 +14,6 @@ import (
 	"log"
 	"net/http"
 	"pet/config"
-	"pet/internal/auth"
 	"pet/internal/middleware"
 	"pet/internal/model"
 	"pet/internal/repository"
@@ -91,7 +90,7 @@ func SetupRoutes(repo *repository.UserRepository) *mux.Router {
 	// router.Handle("/users", middleware.Logging(http.HandlerFunc(handlePostUsers(repo)))).Methods(http.MethodPost)
 
 	protected := router.Methods(http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete).Subrouter()
-	protected.Use(auth.AuthMiddleware)
+	protected.Use(middleware.Auth)
 	protected.Use(middleware.AdminOnly)
 	protected.Use(middleware.EditorOnly)
 
@@ -168,13 +167,13 @@ func PostUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 		defer r.Body.Close()
 		err := json.NewDecoder(r.Body).Decode(&newUser)
 		if err != nil {
-			http.Error(w, "[SERVER] неверный формат JSON", http.StatusBadRequest)
+			ErrorHandler(w, r, err, "failed to decode JSON", http.StatusBadRequest)
 			return
 		}
 
 		err = validate.Struct(newUser)
 		if err != nil {
-			http.Error(w, "[SERVER] JSON не прошел валидацию по полям: "+err.Error(), http.StatusBadRequest)
+			ErrorHandler(w, r, err, "validation failed", http.StatusBadRequest)
 			return
 		}
 
@@ -182,12 +181,11 @@ func PostUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 		if err != nil {
 			// Проверим, ошибка ли это валидации (ошибка пользователя)
 			if strings.Contains(err.Error(), "обязательны для заполнения") {
-				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				ErrorHandler(w, r, err, "unprocessable entity", http.StatusUnprocessableEntity)
 				return
 			}
-
 			// Иначе — это внутренняя ошибка сервера
-			http.Error(w, "[SERVER] ошибка при добавлении нового пользователя в БД", http.StatusInternalServerError)
+			ErrorHandler(w, r, err, "add new user error", http.StatusInternalServerError)
 			return
 		}
 
@@ -234,20 +232,20 @@ func RegisterHandler(repo *repository.UserRepository) http.HandlerFunc {
 
 		err := json.NewDecoder(r.Body).Decode(&registerUser)
 		if err != nil {
-			http.Error(w, "[SERVER] неверный формат JSON", http.StatusBadRequest)
+			ErrorHandler(w, r, err, "invalid request format", http.StatusBadRequest)
 			return
 		}
 
 		err = validate.Struct(registerUser)
 		if err != nil {
-			http.Error(w, "[SERVER] JSON не прошел валидацию по полям: "+err.Error(), http.StatusBadRequest)
+			ErrorHandler(w, r, err, "validation failed ", http.StatusBadRequest)
 			return
 		}
 
 		// хеширование пароля
 		hash, err := bcrypt.GenerateFromPassword([]byte(registerUser.Password), bcrypt.DefaultCost)
 		if err != nil {
-			http.Error(w, "[SERVER] ошибка при хешировании пароля:"+err.Error(), http.StatusInternalServerError)
+			ErrorHandler(w, r, err, "hash password error:", http.StatusInternalServerError)
 		}
 
 		var newUser model.User
@@ -260,11 +258,11 @@ func RegisterHandler(repo *repository.UserRepository) http.HandlerFunc {
 		if err != nil {
 			// Проверим, ошибка ли это валидации (ошибка пользователя)
 			if strings.Contains(err.Error(), "обязательны для заполнения") {
-				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				ErrorHandler(w, r, err, "unprocessable entity", http.StatusUnprocessableEntity)
 				return
 			}
 			// Иначе — это внутренняя ошибка сервера
-			http.Error(w, "[SERVER] ошибка при добавлении нового пользователя в БД", http.StatusInternalServerError)
+			ErrorHandler(w, r, err, "add new user error", http.StatusInternalServerError)
 			return
 		}
 
@@ -305,7 +303,7 @@ func GetUsersHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		getUsers, err := repo.GetAllUsers()
 		if err != nil {
-			http.Error(w, "[SERVER] ошибка при получении списка пользователей", http.StatusInternalServerError)
+			ErrorHandler(w, r, err, "get all users error", http.StatusInternalServerError)
 			return
 		}
 
@@ -350,31 +348,31 @@ func PutUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 
 		id, err := parseIDFromRequest(r)
 		if err != nil {
-			http.Error(w, "[SERVER]"+err.Error(), http.StatusBadRequest)
+			ErrorHandler(w, r, err, "failed to get ID from URL", http.StatusBadRequest)
 		}
 
 		var updatedUser model.User
 		err = json.NewDecoder(r.Body).Decode(&updatedUser)
 		if err != nil {
-			http.Error(w, "[SERVER] неверный формат JSON", http.StatusBadRequest)
+			ErrorHandler(w, r, err, "failed to decode JSON", http.StatusBadRequest)
 			return
 		}
 		defer r.Body.Close()
 
 		if updatedUser.ID != id {
-			http.Error(w, "[SERVER] ID из URL и тела запроса не совпадают", http.StatusBadRequest)
+			ErrorHandler(w, r, err, "ID from URL and ID from body do not match", http.StatusBadRequest)
 			return
 		}
 
 		// Простая проверка на пустые поля
 		if updatedUser.Name == "" || updatedUser.Email == "" || updatedUser.Age == 0 {
-			http.Error(w, "некорректные данные: пустые поля", http.StatusBadRequest)
+			ErrorHandler(w, r, err, "incorrect data: empty fields", http.StatusBadRequest)
 			return
 		}
 
 		err = validate.Struct(updatedUser)
 		if err != nil {
-			http.Error(w, "[SERVER] JSON не прошел валидацию по полям: "+err.Error(), http.StatusBadRequest)
+			ErrorHandler(w, r, err, "validation failed", http.StatusBadRequest)
 			return
 		}
 
@@ -384,11 +382,11 @@ func PutUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 		putUser, err := repo.PutUser(updatedUser)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, fmt.Sprintf("пользователь с ID %d не найден", updatedUser.ID), http.StatusNotFound)
+				ErrorHandler(w, r, err, "user not found", http.StatusNotFound)
 				return
 			}
 
-			http.Error(w, "внутренняя ошибка сервера", http.StatusInternalServerError)
+			ErrorHandler(w, r, err, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
@@ -431,18 +429,19 @@ func PatchUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 
 		id, err := parseIDFromRequest(r)
 		if err != nil {
-			http.Error(w, "[SERVER]"+err.Error(), http.StatusBadRequest)
+			ErrorHandler(w, r, err, "failed to get ID from URL", http.StatusBadRequest)
+			return
 		}
 
 		var updatedUser model.PartialUser
 		err = json.NewDecoder(r.Body).Decode(&updatedUser)
 		if err != nil {
-			http.Error(w, "Некорректный JSON", http.StatusBadRequest)
+			ErrorHandler(w, r, err, "failed to decode JSON", http.StatusBadRequest)
 			return
 		}
 
 		if updatedUser.ID != id {
-			http.Error(w, "[SERVER] ID в URL не соответствует ID в теле PATCH-запроса", http.StatusBadRequest)
+			ErrorHandler(w, r, err, "ID from URL and ID from body do not match", http.StatusBadRequest)
 			return
 		}
 
@@ -454,7 +453,7 @@ func PatchUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 
 		err = validate.Struct(updatedUser)
 		if err != nil {
-			http.Error(w, "[SERVER] JSON не прошел валидацию по полям: "+err.Error(), http.StatusBadRequest)
+			ErrorHandler(w, r, err, "validation failed", http.StatusBadRequest)
 			return
 		}
 
@@ -462,13 +461,13 @@ func PatchUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 		if err != nil {
 			switch {
 			case err.Error() == "нет полей для обновления":
-				http.Error(w, "[SERVER] необходимо передать хотя бы одно поле для обновления", http.StatusBadRequest)
+				ErrorHandler(w, r, err, "no fields to update", http.StatusBadRequest)
 				return
 			case errors.Is(err, sql.ErrNoRows):
-				http.Error(w, "[SERVER] пользователь с таким ID не найден", http.StatusNotFound)
+				ErrorHandler(w, r, err, "user not found", http.StatusNotFound)
 				return
 			default:
-				http.Error(w, "[SERVER] ошибка при PATCH-обновлении пользователя в БД", http.StatusInternalServerError)
+				ErrorHandler(w, r, err, "update user error", http.StatusInternalServerError)
 				return
 			}
 		}
@@ -505,17 +504,15 @@ func PatchUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 func DeleteUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		log := middleware.LoggerFromContext(r.Context())
-
 		id, err := parseIDFromRequest(r)
 		if err != nil {
-			http.Error(w, "[SERVER]"+err.Error(), http.StatusBadRequest)
+			ErrorHandler(w, r, err, "failed to get ID from URL", http.StatusBadRequest)
 			return
 		}
 
 		err = repo.DeleteUser(id)
 		if err != nil {
-			http.Error(w, "[SERVER] ID пользователя не найден в БД", http.StatusNotFound)
+			ErrorHandler(w, r, err, "user not found", http.StatusNotFound)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -535,22 +532,21 @@ func DeleteUserHandler(repo *repository.UserRepository) http.HandlerFunc {
 func GetUserByIDFromURLHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		log := middleware.LoggerFromContext(r.Context())
-
 		id, err := parseIDFromRequest(r)
 		if err != nil {
-			http.Error(w, "[SERVER]"+err.Error(), http.StatusBadRequest)
+			ErrorHandler(w, r, err, "failed to get ID from URL", http.StatusBadRequest)
 			return
 		}
 
 		getUser, err := repo.GetUserByID(id)
 		if err != nil {
-			http.Error(w, "[SERVER] не удалось найти пользователя в БД по ID", http.StatusNotFound)
+			ErrorHandler(w, r, err, "user not found", http.StatusNotFound)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+
 		_ = json.NewEncoder(w).Encode(getUser)
 	}
 }
@@ -567,18 +563,15 @@ func GetUserByIDFromURLHandler(repo *repository.UserRepository) http.HandlerFunc
 func GetUserByIDFromContextHandler(repo *repository.UserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		log := middleware.LoggerFromContext(r.Context())
-
-		id, ok := auth.GetUserIDFromContext(r)
+		id, ok := middleware.GetUserIDFromContext(r)
 		if !ok {
-			http.Error(w, "[SERVER] ID не был передан с контекстом из middleware", http.StatusInternalServerError)
+			ErrorHandler(w, r, fmt.Errorf("ID did not send with context from middleware"), "no ID with context", http.StatusInternalServerError)
 			return
 		}
 
 		getUser, err := repo.GetUserByID(id)
 		if err != nil {
-			errorsLogger.Printf("[SERVER] ошибка при поиске пользователя: %v", err)
-			http.Error(w, "[SERVER] не удалось найти пользователя в БД по ID", http.StatusNotFound)
+			ErrorHandler(w, r, err, "user not found", http.StatusNotFound)
 			return
 		}
 
@@ -608,39 +601,39 @@ func LoginHandler(repo *repository.UserRepository) http.HandlerFunc {
 		var user model.LoginRequest
 		err := json.NewDecoder(r.Body).Decode(&user)
 		if err != nil {
-			http.Error(w, "[SERVER]"+err.Error(), http.StatusBadRequest) // не StatusUnauthorized
+			ErrorHandler(w, r, err, "failed to decode JSON", http.StatusBadRequest) // не StatusUnauthorized
 			return
 		}
 
 		err = validate.Struct(user)
 		if err != nil {
-			http.Error(w, "[SERVER] логин или пароль были введены некорректно", http.StatusBadRequest) // не StatusUnauthorized
+			ErrorHandler(w, r, err, "incorrect login or password", http.StatusBadRequest)
 			return
 		}
 
 		loginUser, err := repo.GetUserByEmail(user.Email)
 		if err != nil {
-			http.Error(w, "[SERVER] не удалось найти пользователя по e-mail", http.StatusUnauthorized)
+			ErrorHandler(w, r, err, "user not found by e-mail", http.StatusUnauthorized)
 			return
 		}
 
 		err = bcrypt.CompareHashAndPassword([]byte(loginUser.HashedPassword), []byte(user.Password)) // сначала пароль из БД
 		if err != nil {
-			http.Error(w, "[SERVER] неправильный пароль", http.StatusUnauthorized)
+			ErrorHandler(w, r, err, "user not found by e-mail", http.StatusUnauthorized)
 			return
 		}
 
 		// Создать JWT access-токен
 		accessTokenString, err := getAccessToken(loginUser)
 		if err != nil {
-			http.Error(w, "ошибка при создании токена"+err.Error(), http.StatusInternalServerError)
+			ErrorHandler(w, r, err, "create token error", http.StatusInternalServerError)
 			return
 		}
 
 		// Создать JWT refresh-токен
 		refreshTokenString, err := getRefreshToken(loginUser)
 		if err != nil {
-			http.Error(w, "ошибка при создании токена"+err.Error(), http.StatusInternalServerError)
+			ErrorHandler(w, r, err, "create token error", http.StatusInternalServerError)
 			return
 		}
 
@@ -722,6 +715,38 @@ func getRefreshToken(user model.User) (string, error) {
 		return "", err
 	}
 	return tokenString, nil
+}
+
+func ErrorHandler(wr http.ResponseWriter, req *http.Request, err error, msg string, status int) {
+	log := middleware.LoggerFromContext(req.Context())
+
+	log.Error(msg,
+		zap.Error(err),
+		zap.String("component", "server"),
+		zap.String("event", "http_error"),
+	)
+
+	var clientMsg string
+
+	switch status {
+	case http.StatusBadRequest:
+		clientMsg = "invalid request format"
+	case http.StatusUnauthorized:
+		clientMsg = "access denied"
+	case http.StatusUnprocessableEntity:
+		clientMsg = "validation failed"
+	case http.StatusNotFound:
+		clientMsg = "resource not found"
+	case http.StatusInternalServerError:
+		clientMsg = "internal server error"
+	default:
+		clientMsg = http.StatusText(status)
+		if clientMsg == "" {
+			clientMsg = "error"
+		}
+	}
+
+	http.Error(wr, clientMsg, status)
 }
 
 func waitForServer(url string, timeout time.Duration) error {

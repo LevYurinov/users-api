@@ -24,7 +24,7 @@ func main() {
 	// загружает настройки из конфиг-файла
 	cfg := config.LoadConfig()
 
-	// инициализирует новый логгер с помощью настроек из конфига LoggerConfig
+	// инициализирует новый логер с помощью настроек из конфига LoggerConfig
 	log := logger.New(cfg.Logger)
 	defer log.Sync()
 
@@ -58,5 +58,5 @@ func main() {
 	repo := repository.NewUserRepository(dbUsers, log)
 	server.StartServer(repo, log)
 
-	// client.Run(errorsLogger)
+	// client.Run(log)
 }

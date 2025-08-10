@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"net"
 	"net/http"
@@ -8,7 +9,7 @@ import (
 	"time"
 )
 
-// лимит: 5 запросов в секунду, burst (максимальный "взрыв") — 10
+// задают лимит: 5 запросов в секунду, burst (максимальный "взрыв") — 10
 const (
 	reqPerSecond = 5
 	burstSize    = 10
@@ -21,15 +22,14 @@ type client struct {
 }
 
 // Эта карта (map) хранит лимитеры (rate.Limiter) по IP-адресу пользователя
-//
 // Карты не потокобезопасны в Go.
+var clients = make(map[string]*client)
+
 // Одновременная запись/чтение без синхронизации вызовет панику: concurrent map writes.
 // sync.Mutex используется для блокировки доступа к карте, пока в нее пишут или читают
-
-var clients = make(map[string]*client)
 var mu sync.Mutex
 
-// RateLimiterMiddleware — middleware для ограничения запросов
+// RateLimiterMiddleware — middleware-функция для ограничения запросов
 func RateLimiterMiddleware() func(http.Handler) http.Handler {
 	// запускаем фоновую очистку старых IP
 	go cleanupClients()
@@ -37,14 +37,22 @@ func RateLimiterMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-			// r.RemoteAddr - это поле из http.Request, IP-адрес клиента + порт, с которого он обратился к серверу.
+			log := LoggerFromContext(r.Context())
+
+			// r.RemoteAddr - это поле из http.Request,
+			//IP-адрес клиента + порт, с которого он обратился к серверу.
 			// строка вида "IP:порт", например,"192.168.1.42:54321"
-			// net.SplitHostPort разделяет эту строку на части: IP и порт:
+			// net.SplitHostPort разделяет эту строку на части: IP и порт
 			ip, _, err := net.SplitHostPort(r.RemoteAddr)
 
 			if err != nil {
-				// Если ошибка возникла (например, RemoteAddr был кривой), то мы возвращаем 500 с сообщением:
-				http.Error(w, "Unable to parse IP", http.StatusInternalServerError)
+				log.Error("unable to parse IP",
+					zap.Error(err),
+					zap.String("component", "middleware"),
+					zap.String("event", "rate_limiter"),
+				)
+
+				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
 
@@ -53,8 +61,16 @@ func RateLimiterMiddleware() func(http.Handler) http.Handler {
 
 			// Allow - основной метод, проверяющий, можно ли сейчас выполнить запрос, согласно лимиту?
 			if !limiter.Allow() { // если лимит исчерпан на текущий момент, то
+
+				log.Error("too many requests",
+					zap.String("component", "middleware"),
+					zap.String("event", "rate_limiter"),
+					zap.String("ip", ip),
+				)
+
 				w.Header().Set("Content-Type", "application/json") // заголовок, что ответ будет в JSON
-				http.Error(w, `{"error": "Too Many Requests"}`, http.StatusTooManyRequests)
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"too many requests"}`))
 				return
 			}
 

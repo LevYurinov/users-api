@@ -1,18 +1,31 @@
 package middleware
 
-import "net/http"
+import (
+	"go.uber.org/zap"
+	"net/http"
+)
 
 const (
+	RoleGuest  = "guest"
 	RoleAdmin  = "admin"
-	RoleUser   = "user"
 	RoleEditor = "editor"
 )
 
 func AdminOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		log := LoggerFromContext(r.Context())
+
 		role, ok := r.Context().Value("role").(string)
 		if !ok || role != RoleAdmin {
-			http.Error(w, "доступ запрещен, нужны повышенные права", http.StatusForbidden)
+			log.Error("invalid role",
+				zap.String("component", "middleware"),
+				zap.String("event", "role_checking"),
+				zap.String("required_role", RoleAdmin),
+				zap.String("got_role", role),
+			)
+
+			http.Error(w, "access denied", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -21,9 +34,19 @@ func AdminOnly(next http.Handler) http.Handler {
 
 func EditorOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		log := LoggerFromContext(r.Context())
+
 		role, ok := r.Context().Value("role").(string)
 		if !ok || role != RoleEditor {
-			http.Error(w, "доступ запрещен, нужны повышенные права", http.StatusForbidden)
+			log.Error("invalid role",
+				zap.String("component", "middleware"),
+				zap.String("event", "role_checking"),
+				zap.String("required_role", RoleAdmin),
+				zap.String("got_role", role),
+			)
+
+			http.Error(w, "access denied", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
