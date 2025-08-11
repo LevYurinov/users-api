@@ -3,32 +3,51 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"os"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"go.uber.org/zap"
+	"os"
 )
 
-func ConnectDB(dbName string) (*sql.DB, error) {
-	fmt.Println("[DB] Попытка подключения к базе", dbName) // отладка
+func ConnectDB(dbName string, log *zap.Logger) (*sql.DB, error) {
 
-	connStr := fmt.Sprintf("host=localhost port=5432 user=postgres password=postgres dbname=%s sslmode=disable", dbName)
-	fmt.Println("[DB] строка подключения:", connStr)
-
-	connStr = os.Getenv("POSTGRES_DSN")
+	connStr := os.Getenv("POSTGRES_DSN")
 	if connStr == "" {
-		return nil, fmt.Errorf("переменная POSTGRES_DSN не установлена")
+		connStr = fmt.Sprintf("host=localhost port=5432 user=postgres password=postgres dbname=%s sslmode=disable", dbName)
+
+		log.Error("POSTGRES_DSN is empty", // отсутствие строки подкл. это проблема
+			zap.String("db_name", dbName),
+			zap.String("component", "database"),
+			zap.String("operation", "Getenv"))
+
+		return nil, fmt.Errorf("database/ConnectDB: db connection error")
 	}
 
 	db, err := sql.Open("pgx", connStr)
 	if err != nil {
-		return nil, fmt.Errorf("[DATA BASE] ошибка открытия соединения в БД %v: %w", dbName, err)
+		log.Error("open db error",
+			zap.Error(err),
+			zap.String("db_name", dbName),
+			zap.String("component", "database"),
+			zap.String("operation", "Open"))
+
+		return nil, fmt.Errorf("database/ConnectDB: open db error: %w", err)
 	}
 
 	err = db.Ping()
 	if err != nil {
-		return nil, fmt.Errorf("[DATA BASE] ошибка соединения с БД %v: %w", dbName, err)
+		log.Error("connection db error",
+			zap.Error(err),
+			zap.String("db_name", dbName),
+			zap.String("component", "database"),
+			zap.String("operation", "Ping"))
+
+		return nil, fmt.Errorf("database/ConnectDB: connection db error: %w", err)
 	}
 
-	fmt.Printf("✅ Соединение с БД %v установлено!", dbName)
+	log.Info("db connection set",
+		zap.String("db_name", dbName),
+		zap.String("component", "database"),
+		zap.String("operation", "connection"))
+
 	return db, nil
 }

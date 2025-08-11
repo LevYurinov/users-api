@@ -17,6 +17,7 @@ import (
 	"pet/internal/logger"
 	"pet/internal/repository"
 	"pet/internal/server"
+	"pet/internal/service"
 	"runtime/debug"
 )
 
@@ -49,13 +50,16 @@ func main() {
 			zap.String("db_name", "app_db"),
 			zap.String("env", cfg.Logger.AppEnv),
 			zap.String("component", "database"),
-			zap.String("operation", "connect"),
+			zap.String("event", "connect"),
 		)
 		os.Exit(1)
 	}
 	defer dbUsers.Close()
 
 	repo := repository.NewUserRepository(dbUsers, log)
+	srv := service.NewUserService(repo, log)
+	_ = srv
+
 	server.StartServer(repo, log)
 
 	// client.Run(log)
