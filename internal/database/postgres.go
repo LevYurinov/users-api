@@ -5,22 +5,21 @@ import (
 	"fmt"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
-	"os"
 )
 
+// ConnectDB - функция получения строки с настройками для подключения к БД
 func ConnectDB(dbName string, log *zap.Logger) (*sql.DB, error) {
 
-	connStr := os.Getenv("POSTGRES_DSN")
-	if connStr == "" {
-		connStr = fmt.Sprintf("host=localhost port=5432 user=postgres password=postgres dbname=%s sslmode=disable", dbName)
-
-		log.Error("POSTGRES_DSN is empty", // отсутствие строки подкл. это проблема
+	if dbName == "" {
+		log.Warn("dbName is empty",
 			zap.String("db_name", dbName),
 			zap.String("component", "database"),
 			zap.String("operation", "Getenv"))
 
 		return nil, fmt.Errorf("database/ConnectDB: db connection error")
 	}
+
+	connStr := fmt.Sprintf("host=localhost port=5432 user=user password=newpassword dbname=%s sslmode=disable", dbName)
 
 	db, err := sql.Open("pgx", connStr)
 	if err != nil {

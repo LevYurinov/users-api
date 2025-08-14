@@ -41,13 +41,14 @@ func main() {
 		}
 	}()
 
-	// Подключается к БД
-	dbUsers, err := database.ConnectDB("app_db")
+	// Подключаемся к локальной БД
+	dbName := "usersdb"
+	dbUsers, err := database.ConnectDB(dbName, log)
 	if err != nil {
 		log.Error(
-			"cannot connect to DB",
+			"cannot connect to database",
 			zap.Error(err),
-			zap.String("db_name", "app_db"),
+			zap.String("db_name", dbName),
 			zap.String("env", cfg.Logger.AppEnv),
 			zap.String("component", "database"),
 			zap.String("event", "connect"),
